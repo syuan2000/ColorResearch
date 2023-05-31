@@ -4,37 +4,17 @@ import os
 import time
 from multiprocessing import Process
 import random
-
 import cv2
 import numpy as np
-from matplotlib import pyplot
-from mpl_toolkits.mplot3d import Axes3D
 
-from numba import jit, int32, int64
-# from numba.experimental import jitclass
+#from insert import *
+from randomPalettes import *
 
 
-# spec = [('r', int32), ('g', int32), ('b', int32), ('x', int32), ('y', int32)]
-
-#@jitclass(spec)
-
-# Obselete. Now using an array 5 wide. 0 is red, 1 is green, 2 is blue, 3 is x, 4 is y
-class Pixel:
-
-    # Data type to store basic info about a pixel in a video. Can add x,y, currently unnecessary.
-    r = 0
-    g = 0
-    b = 0
-    x = 0
-    y = 0
-
-    def __init__(self, r, g, b, x, y):
-        self.r = r
-        self.g = g
-        self.b = b
-        self.x = x
-        self.y = y
-
+allKMeans = []
+allTopTen = []
+allPicked = []
+margin = 20
 
 def getFrames(fileName):
     # This function will take in the filename of a video. MP4 works for sure. If the file was 'movie.mp4', you'd give the param 'movie'
@@ -58,118 +38,61 @@ def getFrames(fileName):
         cv2.imwrite(fileName + "/" + "frame" + str(count) + ".tiff", image)  # save frame as JPEG file
         success, image = vidcap.read()
         frameEndTime = time.process_time()
-        print('Frame ' + str(count) + ' took ' + str((frameEndTime-frameStartTime)) + ' : ', success)
+        print('Frame ' + str(count) + ' took ' + str((frameEndTime - frameStartTime)) + ' : ', success)
         count += 1
     getFramesEndTime = time.process_time()
     print('Gathered ' + str(count) + ' frame(s) in ' + str((getFramesEndTime - getFramesStartTime)) + ' seconds')
 
 
-def frameGetAvgRGB(folderName, xLen, yLen, startingFrame):
-    # i is the starting frame number. Default is 0 to
-    i = startingFrame
-    pixelCount = 0
-    frame = cv2.imread(folderName + "/frame" + str(i) + ".tiff")
-    # frame will be none if file doesn't exist. Check for that to prevent errors.
-    if frame is None:
-        print('Frame ' + str(i) + ' not found. Done Processing Frames')
-        return False
-    pixelList = []
-    allR = 0
-    allG = 0
-    allB = 0
-    for y in range(0, yLen):
-        # print("Row " + str((x-1)) + " done.")
-        for x in range(0, xLen):
-            b, g, r = (frame[x, y])
-            # print("RBG of pixel " + str(i) + " (" + str(r) + ", " + str(g) + ", " + str(b) + ")")
-            allR += r
-            allG += g
-            allB += b
-            pixelCount += 1
-            pixelList.append(Pixel(r, g, b))
+def getFramesInterval(fileName, fps, movieLength, totalFrames, padding, startingTime):
+    framesSkipped = round((fps * float(movieLength)) / totalFrames)
+    vidcap = cv2.VideoCapture(fileName + ".mp4")
+    success, image = vidcap.read()
+    count = 0
+    done = False
+    getFramesStartTime = time.time()
+    groups = 0
+    folderAlteration = ""
+    try:
+        os.mkdir(fileName)
+        # os.mkdir(fileName + '/Scatters')
+        # print('Made Folder')
+    except:
+        folderAlteration = "1"
+        print('Folder Already Exists, please deleted and restart.')
+        return 1
+    # initial skip to starting frames of actual content
 
-    print('AVG RGB of Frame ' + str(i) + ' = (' + str((allR / pixelCount)) + ',' + str((allG / pixelCount)) + ',' + str(
-        (allB / pixelCount)) + ')')
-    create3DScatterPlot(folderName, pixelList, i, 2)
-    i += 1
+    initSkip = round(startingTime * fps)
+    for i in range(0, initSkip):
+        count += 1
+        success, image = vidcap.read()
+        if not success:
+            done = True
+            break
 
+    while not done:
+        # Grab frames
+        for i in range(-padding, padding + 1):
+            cv2.imwrite(fileName + "/" + "frame" + str(count) + ".tiff", image)  # save frame as TIFF file
+            count += 1
+            success, image = vidcap.read()
+            if not success:
+                done = True
+                break
 
-def rgb_to_hex(rgb):
-    return '%02x%02x%02x' % rgb
+        for i in range(0, framesSkipped - padding):
+            success, image = vidcap.read()
+            count += 1
+            if not success:
+                done = True;
+                break
+        groups += 1
+        if groups >= totalFrames:
+            done = True
 
-
-def create3DScatterPlot(folderName, pixelList, frameNum, showOver):
-    # Dump all duplicates.
-    # showOver only plots the points if it occurs at least the specified amount
-    # Create a 3d array 0-255, if we have one RGB value, set that value in the 3d array to 1, and don't add. Else, add and set it to 1.
-    RBGArr = np.zeros((256, 256, 256))
-    # newPixelList = []
-    rL = []
-    gL = []
-    bL = []
-
-    # print('Num Before = ' + str(len(pixelList)))
-    i = 0
-    for i in range(0, len(pixelList)):
-        RBGArr[pixelList[i].r, pixelList[i].g, pixelList[i].b] += 1
-        if (RBGArr[pixelList[i][0], pixelList[i][1], pixelList[i][2]] == showOver):
-            # newPixelList.append(Pixel(pixelList[i].r, pixelList[i].g, pixelList[i].b))
-            # RBGArr[pixelList[i].r, pixelList[i].g, pixelList[i].b] = 1
-            rL.append(pixelList[i][0])
-            gL.append(pixelList[i][1])
-            bL.append(pixelList[i][2])
-
-    print('Frame ' + str(frameNum) + ': ' + str(len(pixelList)) + '->' + str(len(rL)))
-
-    fig = pyplot.figure()
-    ax = Axes3D(fig)
-
-    for i in range(0, len(rL)):
-        rgbs = '#%02x%02x%02x' % (rL[i], gL[i], bL[i])
-        ax.scatter(rL[i], gL[i], bL[i], c=rgbs)
-    ax.set_xlim(0, 255)
-    ax.set_ylim(0, 255)
-    ax.set_zlim(0, 255)
-    ax.set_xlabel('R')
-    ax.set_ylabel('G')
-    ax.set_zlabel('B')
-
-    # pyplot.show()
-    print('Saving Chart ' + str(frameNum) + '...')
-    pyplot.savefig(folderName + '/Scatters/Frame' + str(frameNum) + '.png')
-    print('Saved Chart for Frame ' + str(frameNum) + '.')
-    pyplot.close(fig)
-
-
-def createMP4FromPng(fileFormat, fps):
-    image_folder = fileFormat
-    video_name = fileFormat + 'Scatter.avi'
-    print('Looking in ' + image_folder + '/Scatters/')
-    images = [img for img in os.listdir(image_folder + '/Scatters/') if img.endswith(".png")]
-    print('Found ' + str(len(images)))
-    frame = cv2.imread((fileFormat + '/Scatters/Frame0.png'))
-    height, width, layers = frame.shape
-
-    video = cv2.VideoWriter(video_name, 0, fps, frameSize=(width, height))
-    for x in range(0, len(images)):
-        video.write(cv2.imread(fileFormat + '/Scatters/Frame' + str(x) + '.png'))
-
-    cv2.destroyAllWindows()
-    video.release()
-
-
-def insertIntoDB(pixel):
-    import MySQLdb as mysql
-
-    mydb = mysql.connector.connect(
-        host="localhost",
-        user="yourusername",
-        password="yourpassword"
-    )
-    mycursor = mydb.cursor()
-    mycursor.execute("SHOW DATABASES")
-    for x in mycursor:
-        print(x)
+    getFramesEndTime = time.time()
+    print('Gathered ' + str(count) + ' frame(s) in ' + str((getFramesEndTime - getFramesStartTime)) + ' seconds')
 
 
 def getFramesWithPath(fileName, absolutePath):
@@ -185,6 +108,8 @@ def getFramesWithPath(fileName, absolutePath):
     folderAlteration = ""
     try:
         os.mkdir(absolutePath + '/' + fileName)
+        os.mkdir(absolutePath + '/' + fileName + '/palettes')
+
         # os.mkdir(absolutePath + '/' + fileName + '/Scatters')
         # print('Made Folder')
     except:
@@ -202,28 +127,25 @@ def getFramesWithPath(fileName, absolutePath):
     print('Gathered ' + str(count) + ' frame(s) in ' + str((getFramesEndTime - getFramesStartTime)) + ' seconds')
 
 
-# @jit('i8[:,:](i4,i4,types.unicode_type,i4)', nopython=False)
-def loadPixelArray(width, length, folder, frameNum):
+def loadPixelArray(width, height, folder, fileName):
     # import cupy as np
-
     # function returns an array of Pixel objects for a frame.
     # i is the starting frame number. Default is 0 to
     timeStart = time.time()
     pixelCount = 0
-    frame = cv2.imread(folder + "/frame" + str(frameNum) + ".tiff")
+    frame = cv2.imread(folder + "/" + str(fileName))
     # frame will be none if file doesn't exist. Check for that to prevent errors.
     if frame is None:
-        print('Frame ' + str(frameNum) + ' not found at ' + folder + "/frame" + str(
-            frameNum) + ".tiff" + '. Done Processing Frames')
+        print('Frame ' + str(fileName) + ' not found at ' + folder + '/' + fileName + '. Done Processing Frames')
         return False
-    pixelList = np.empty(shape=(length*width,5), dtype=int)
+    pixelList = np.empty(shape=(height * width, 5), dtype=int)
     r = 0
     g = 0
     b = 0
 
-    for y in range(0, width):
+    for y in range(0, height):
         # print("Row " + str((x-1)) + " done.")
-        for x in range(0, length):
+        for x in range(0, width):
             b, g, r = (frame[x, y])
             pixelList[pixelCount][0] = r
             pixelList[pixelCount][1] = g
@@ -237,70 +159,57 @@ def loadPixelArray(width, length, folder, frameNum):
     print('loadPixelArray took ' + str(time.time() - timeStart) + ' seconds.')
     return np.array(pixelList)
 
-@jit()
+
 def returnTopTen(width, height, fileName, frameNum):
     # import cupy as np
     pixels = loadPixelArray(width, height, fileName, frameNum)
-    topTen = np.empty((10, 5), dtype='i8')
+    topTen = np.empty([10, 5], dtype=np.uint8)
     # create array of zeroes
 
-    tracker = np.zeros((256 * 256 * 256), dtype='i8')
-    # timeStart = time.process_time()
-    # print('Starting top ten process..')
+    tracker = np.zeros((256, 256, 256), dtype=np.uint8)
     # tracker int array will be equal to the occurrences of the [r][g][b] value.
-    #if not pixels:
-    #    return [Pixel(-1, -1, -1, -1, -1)]
     for i in range(0, len(pixels)):
-        tracker[((pixels[i][0] * 65536) + (pixels[i][1] * 256) + pixels[i][2])] += 1  # add one to count the occurrence of a given RBG value
+        tracker[((pixels[i][0] * 65536) + (pixels[i][1] * 256) + pixels[i][
+            2])] += 1  # add one to count the occurrence of a given RBG value
     ind = tracker.argsort()[::-1][:10]
     for i in range(0, len(ind)):
-        r = math.floor(ind[i] / 65536)  # round down on both, will always be partial if not like [255][0][0] or [156][0][0]
+        r = math.floor(
+            ind[i] / 65536)  # round down on both, will always be partial if not like [255][0][0] or [156][0][0]
         g = math.floor((ind[i] / 256) % 256)
         b = ind[i] % 256
         np.append(topTen, [r, g, b, int(tracker[ind[i]]), 0])
 
-        print(str(i + 1) + ': (' + str(r) + ', ' + str(g) + ', ' + str(b) + ') occurs ' + str(int(tracker[ind[i]])) + ' times.')
+        print(str(i + 1) + ': (' + str(r) + ', ' + str(g) + ', ' + str(b) + ') occurs ' + str(
+            int(tracker[ind[i]])) + ' times.')
     # print('Top Ten Calculation took ' + str(time.process_time() - timeStart) + ' seconds.')
-    getNKMeans(pixels, 10, frameNum, 'madMax', 800, 1920)
+    getNKMeans(pixels, 10, str(frameNum), fileName, 800, 1920)
     return topTen
-    # Return topTen
-
-    # print('ind: ' + str(ind))
 
 
-def createPalleteImage(colors, width, height, folder, frameNum):
+def createPalleteImage(colors, width, height, folder, fileName):
     from colorsys import hsv_to_rgb
     from PIL import Image
-    barW = math.floor((width / len(colors)))
-    imageA = np.zeros([height, width, 3], dtype=np.uint8)
-    holder = 0
-    for i in range(0, len(colors)):
-        imageA[0:height, holder:(holder + barW)] = [colors[i, 0], colors[i, 1], colors[i, 2]]
-        holder += barW
-
-    img = Image.fromarray(imageA, 'RGB', )
-    img.save(folder + '/palettes/' + str(frameNum)+'.png')
-    img.show()
-
-
-def makeCharts(frameCount, fileName):
-    while True:
-        threads = []
-        threadCount = 10
-        errors = 0
-        for x in range(0, threadCount):
-            print('Starting Thread ' + str(x))
-            thread = Process(target=frameGetAvgRGB, args=(fileName, 1080, 1920, frameCount + x))
-            threads.append(thread)
-            threads[x].start()
-        for x in range(0, threadCount):
-            threads[x].join()
-        print('Completed Frames ' + str(frameCount) + '-' + str(frameCount + 9))
-        frameCount += 10
+    try:
+        barW = math.floor((width-margin*9) / len(colors))
+        imageA = np.zeros([height, width, 3], dtype=np.uint8)
+        
+        holder = 0
+        for i in range(0, len(colors)):
+            imageA[0:height, holder:(holder + barW)] = [colors[i, 0], colors[i, 1], colors[i, 2]]
+            holder += barW
+            # Eva: add white merge bar between each color
+            if(i<len(colors)-1):
+                cv2.rectangle(imageA, (int(holder), 0), (int(holder + margin), height),(255, 255, 255), -1)
+                holder+= margin
+        img = Image.fromarray(imageA, 'RGB')
+        img.save(folder + '/palettes/' + fileName + '.png')
+    except Exception as e:
+        print("Error: ", e)
+    # img.show()
 
 
 def threadedGetTopTen(width, height, fileName, frameNum):
-    threadCount = 1
+    threadCount = 5
     while True:
         timeStart = time.time()
         threads = []
@@ -316,15 +225,15 @@ def threadedGetTopTen(width, height, fileName, frameNum):
             round((time.time() - timeStart) / threadCount, 4)) + ' seconds/frame.')
         frameNum += threadCount
 
-@jit()
-def getNKMeans(pixels, clusterNum, frameNum, folder, width, height):
+
+def getNKMeans(pixels, clusterNum, folder, fileName, width, height):
     clusters = np.zeros([clusterNum, 3], dtype=np.uint8)
-    frame = cv2.imread(folder + "/frame" + str(frameNum) + ".tiff")
-    print('Looking for "' + folder + "/frame" + str(frameNum) + ".tiff\"")
+    frame = cv2.imread(folder + "/" + str(fileName))
+    print('Looking for "' + folder + "/" + str(fileName) + "\"")
     # frame will be none if file doesn't exist. Check for that to prevent errors.
     if frame is None:
-        print('Frame ' + str(frameNum) + ' not found at ' + folder + "/frame" + str(
-            frameNum) + ".tiff" + '. Done Processing Frames')
+        print('Frame ' + str(fileName) + ' not found at ' + folder + "/frame" + str(
+            fileName) + '. Done Processing Frames')
         return False
     # Set the initial N clusters
     for i in range(0, clusterNum):
@@ -335,14 +244,17 @@ def getNKMeans(pixels, clusterNum, frameNum, folder, width, height):
         clusters[i, 1] = g
         clusters[i, 2] = b
         # print('Frame: "' + str(frameNum[x,y]))
-        print('Pixel chosen at (' + str(x) + ', ' + str(y) + ') Color: (' + str(r) + ', ' + str(g) + ', ' + str(b) + ')')
+        print(
+            'Pixel chosen at (' + str(x) + ', ' + str(y) + ') Color: (' + str(r) + ', ' + str(g) + ', ' + str(b) + ')')
 
     # Variable setup, same structure, just 64 bits to store massive numbers just in case.
-    clusterAvgs = np.zeros([clusterNum, 3], dtype=np.int64)
-    clusterCount = np.zeros([clusterNum], dtype=np.int32)
-    counter = 1
+    # clusterAvgs = np.zeros([clusterNum, 3], dtype=np.int64)
+    # clusterCount = np.zeros([clusterNum], dtype=np.int32)
+    counter = 0
     changed = True
-    while(changed):
+    while changed:
+        clusterAvgs = np.zeros([clusterNum, 3], dtype=np.int64)
+        clusterCount = np.zeros([clusterNum], dtype=np.int32)
         changed = False
         print('K Means iteration ' + str(counter))
         counter += 1
@@ -366,82 +278,241 @@ def getNKMeans(pixels, clusterNum, frameNum, folder, width, height):
             # Add one to counter to get a running total.
             clusterCount[clusterMatch] += 1
         for i in range(0, clusterNum):
-            print('Cluster ' + str(i) + ' (' + str(round(clusterAvgs[i, 0]/clusterCount[i], 2)) + ', ' + str(round(clusterAvgs[i, 1]/clusterCount[i], 2)) + ', ' + str(round(clusterAvgs[i, 2]/clusterCount[i], 2)) + ')')
             # reset Clusters for repeating to new values,
-            if round(clusters[i, 0]) != round(clusterAvgs[i, 0] / clusterCount[i]):
+            if not (clusterCount[i] > 0) or clusterCount[i] is None:
+                clusterCount[i] = 1
+            r = round((clusterAvgs[i, 0] / clusterCount[i]))
+            g = round(clusterAvgs[i, 1] / clusterCount[i])
+            b = round(clusterAvgs[i, 2] / clusterCount[i])
+            if round(clusters[i, 0]) != r:
                 changed = True
-                clusters[i, 0] = round(clusterAvgs[i, 0] / clusterCount[i])
-            if round(clusters[i, 1]) != round(clusterAvgs[i, 1] / clusterCount[i]):
+                clusters[i, 0] = clusterAvgs[i, 0] / clusterCount[i]
+            if round(clusters[i, 1]) != g:
                 changed = True
-                clusters[i, 1] = round(clusterAvgs[i, 1] / clusterCount[i])
-            if round(clusters[i, 2]) != round(clusterAvgs[i, 2] / clusterCount[i]):
+                clusters[i, 1] = clusterAvgs[i, 1] / clusterCount[i]
+            if round(clusters[i, 2]) != b:
                 changed = True
-                clusters[i, 2] = round(clusterAvgs[i, 2] / clusterCount[i])
+                clusters[i, 2] = clusterAvgs[i, 2] / clusterCount[i]
+
+        # Comment out next line if you don't need a palette of each iteration.
+        clusters = np.array(sorted(clusters, key=lambda row: max(row)))  # sort by brightest
+        clusters = clusters[::-1]
+        # createPalleteImage(clusters, 1920, 280, folder, (str(fileName) + 'Iteration' + str(counter)))
+        print('Iteration Done')
+        if counter == 15:
+            changed = False
 
 
     # reorder pallette
-    clusters = np.array(sorted(clusters, key=lambda row: sum(row)))
+    clusters = np.array(sorted(clusters, key=lambda row: max(row)))
+    clusters = clusters[::-1]
     for j in range(clusterNum):
-        print('Sorted Value: ' + str(clusters[j, 0] + clusters[j, 1] + clusters[j, 2]))
-
-    createPalleteImage(clusters, 1920, 280, folder, frameNum)
-
+        print('Sorted Value: ' + str(int(clusters[j, 0])+ int(clusters[j, 1]) + int(clusters[j, 2])))
+    return clusters
 
 
+def readMovieCSV(fileName):
+    import csv
+    threads = []
+    file = open(fileName)
+    csvreader = csv.reader(file)
+    header = next(csvreader)
+    print(header)
+    rows = []
+    count = 0
+    for row in csvreader:
+        rows.append(row)
+    for row in rows:
+        print('Processing Movie ' + str(row[0]))
+        length = row[4].split(':')
+        # seconds of actual footage
+        showTime = (3600 * int(length[0])) + (60 * int(length[1])) + int(length[2])
+        print('H: ' + str(length[0]) + ' M: ' + str(length[1]) + ' S: ' + str(length[2]))
+        print('Showtime in Seconds: ' + str(showTime))
+        start = row[2].split(':')
+        startTime = (60 * int(start[1])) + int(start[2])
+        fName = (row[1].replace(".mp4", ""))
+        fps = float(row[5])
+        thread = Process(target=getFramesInterval, args=(fName, fps, showTime, 20, 3, startTime))
+        threads.append(thread)
+        # print('Starting ' + str(frameNum + i))
+        threads[count].start()
+        # getFramesInterval(fName, fps, showTime, 20, 3, startTime)
+        count += 1
+    file.close()
+    for i in range(0, count):
+        threads[i].join()
 
 
+def getFileNames(folderName):
+    from pathlib import Path
+
+    # iterate over files in
+    # that directory
+    files = sorted(Path(folderName).glob('*.tiff'), key=lambda x: int(os.path.splitext(x)[0].split('ame')[1]))
+
+    return files
+
+
+def processFrames(folderName,csvfile, count):
+    files = list(getFileNames(folderName))
+
+    # print('File 0: ' + str(files[0]))
+    # for filePath in files:
+    #     filePath = str(filePath).split('\\')
+    # processSingleFrame(800,1920, filePath[0], filePath[1])
+    threads = []
+    for i in range(0, len(files)):
+        filePath = str(files[i]).split('/')
+        thread = Process(target=processSingleFrame, args=(1036, 1920, filePath[0], filePath[1], csvfile, count))
+
+        threads.append(thread)
+        threads[i].start()
+    for i in range(0, len(files)):
+        threads[i].join()
+
+
+def processSingleFrame(height, width, folder, fileName, csvfile, count):
+    # import cupy as np
+    try:
+        pixels = loadPixelArray(height, width, folder, fileName)
+        topTen = np.empty([10, 3], dtype=np.uint8)
+        #create array of zeroes
+        tracker = np.zeros((256,256,256), dtype=int)
+        # tracker int array will be equal to the occurrences of the [r][g][b] value.
+##        for i in range(0, len(pixels)):
+##            tracker[pixels[i][0]][pixels[i][1]][pixels[i][2]] += 1 # add one to count the occurrence of a given RBG value
+##
+##        for num in range(0, 10): # get 10 highest values
+##            maxR = 0
+##            maxG = 0
+##            maxB = 0
+##            highestVal = 0
+##            for i in range(255):
+##                for j in range(255):
+##                    for k in range(255):
+##                        if tracker[i][j][k] > highestVal:
+##                            highestVal = tracker[i][j][k]
+##                            maxR = i
+##                            maxG = j
+##                            maxB = k
+##            print('[' + str(num) + ': ' + str(maxR)+',' + str(maxG) + ',' + str(maxB) + '] ' + str(highestVal) + ' times.')
+##            tracker[maxR][maxG][maxB] = 0 # set to -1 so it wont ever be picked again, avoid duplicates
+##            topTen[num][0] = maxR
+##            topTen[num][1] = maxG
+##            topTen[num][2] = maxB
+##        topTen = np.array(sorted(topTen, key=lambda row: max(row)))
+##        topTen = topTen[::-1]
+##
+##        createPalleteImage(topTen, 1920, 280, folder, fileName + "-TOPTEN")
+        # reading random pick .csv file from randomPalettes.py
+        # allPicked = randomP(csvfile)
+        # randomPalette = allPicked[count]
+        # #print("random: ", count, fileName, randomPalette)
+        # createPalleteImage(randomPalette, 1920, 280, folder, fileName + "-PICKED")
+
+        KMeansClusters = getNKMeans(pixels, 10, folder, fileName, height, width)
+
+        # Get the Chosen Palette.
+
+        # Create Palette Images
+        createPalleteImage(KMeansClusters, 1920, 280, folder, fileName + "-KMEANS(15)")
+    except Exception as e:
+        print("single error: ", e)
+    return topTen
+
+
+def overallKmeans(pixels, clusterNum):
+    clusters = np.zeros([clusterNum, 3], dtype=np.uint8)
+    for i in range(0, clusterNum):
+        clusters[i, 0] = pixels[i, 0]
+        clusters[i, 1] = pixels[i, 1]
+        clusters[i, 2] = pixels[i, 2]
+
+    counter = 0
+    changed = True
+    while changed:
+        clusterAvgs = np.zeros([clusterNum, 3], dtype=np.int64)
+        clusterCount = np.zeros([clusterNum], dtype=np.int32)
+        changed = False
+        print('K Means iteration ' + str(counter))
+        counter += 1
+        for pixel in pixels:
+            # get distance to each point.
+            d = 100000
+            clusterMatch = 0
+            for i in range(0, clusterNum):
+                tR = (clusters[i, 0] - pixel[0]) ** 2
+                tG = (clusters[i, 1] - pixel[1]) ** 2
+                tB = (clusters[i, 2] - pixel[2]) ** 2
+                print("r:", tR, "g:", tG, "b:", tB)
+                dT = math.sqrt(tR + tG + tB)
+                if dT < d:
+                    d = dT
+                    clusterMatch = i
+            # print('Closest to cluster ' + str(clusterMatch))
+            # Now we know which cluster the pixel is closest to, so add values to the total for that cluster
+            clusterAvgs[clusterMatch, 0] += pixel[0]
+            clusterAvgs[clusterMatch, 1] += pixel[1]
+            clusterAvgs[clusterMatch, 2] += pixel[2]
+            # Add one to counter to get a running total.
+            clusterCount[clusterMatch] += 1
+        for i in range(0, clusterNum):
+            # reset Clusters for repeating to new values,
+            if not (clusterCount[i] > 0) or clusterCount[i] is None:
+                clusterCount[i] = 1
+            r = round((clusterAvgs[i, 0] / clusterCount[i]))
+            g = round(clusterAvgs[i, 1] / clusterCount[i])
+            b = round(clusterAvgs[i, 2] / clusterCount[i])
+            if round(clusters[i, 0]) != r:
+                changed = True
+                clusters[i, 0] = clusterAvgs[i, 0] / clusterCount[i]
+            if round(clusters[i, 1]) != g:
+                changed = True
+                clusters[i, 1] = clusterAvgs[i, 1] / clusterCount[i]
+            if round(clusters[i, 2]) != b:
+                changed = True
+                clusters[i, 2] = clusterAvgs[i, 2] / clusterCount[i]
+
+        # Comment out next line if you don't need a palette of each iteration.
+        clusters = np.array(sorted(clusters, key=lambda row: max(row)))  # sort by brightest
+        clusters = clusters[::-1]
+        # createPalleteImage(clusters, 1920, 280, folder, (str(fileName) + 'Iteration' + str(counter)))
+        print('Iteration Done')
+        if counter == 15:
+            changed = False
+
+    # reorder pallette
+    clusters = np.array(sorted(clusters, key=lambda row: sum(row)))
+    clusters = clusters[::-1]
+    for j in range(clusterNum):
+        print('Sorted Value: ' + str(int(clusters[j, 0]) + int(clusters[j, 1]) + int(clusters[j, 2])))
+    return clusters
 
 if __name__ == '__main__':
     # main execution thread
-    # import colorDatabase
-
-
     # getFrames() takes in the name of the file, without the extension mp4, creates a folder, and then fills the folder with all frames.
-
-    # getFrames('1917')
-    # getFrames('AnnaKarenina')
-    # getFrames('Arrival')
-    # getFrames('BladeRunner2049')
-    # getFrames('DarkestHour')
-    # getFrames('DjangoUnchained')
-    # getFrames('Gravity')
-    # getFrames('Hugo')
-    # getFrames('Inception')
-    # getFrames('InsideLlewynDavis')
-    # getFrames('Joker')
-    # getFrames('LifeofPi')
-    # getFrames('Lincoln')
-    # getFrames('MadMaxFuryRoad')
-    # getFrames('Sicario')
-    # getFrames('Tenet')
-    # getFrames('TheHatefulEight')
-    # getFrames('TheShapeofWater')
-
-    # Run multiple threads
+    # threadedGetTopTen(1920, 800, 'Inception', 2077)
 
     # Example of a Pixel Array filled for a given array, function can be used as a parameter in other functions, see next example.
     # a = loadPixelArray(1920, 800, 'MadMaxFuryRoad', 600)
-    # print(' b: ' + str(a[50000].b))
-
     # Example of a Pixel Array being filled by loadPixelArray, but the returned pixel array is then sent to the returnTopTen function.
     # getFrames('tonyDies')
     # returnTopTen(loadPixelArray(1920, 800, 'MadMaxFuryRoad', 600))
 
-    # calling a function that runs returnTopTen on multiple threads, because parallelism is much faster.
+    #getFramesInterval("AnnaKarenina", 23.98, 9059, 20, 3, 123)
+
+    # ***** Example of running all movies in a csv. *****
+    # readMovieCSV('MovieData.csv')
+
+    processSingleFrame(1036, 1920, "Joker", "frame138601.tiff", "", 0)
+    
+    #processFrames('TheShapeofWater', 'hateful.csv', 4)
+    # allPicked = randomP("gravity.csv")
 
 
-    threadedGetTopTen(1920, 800, 'madMax', 24861)
+    # for i in range(15):
+    #     array[i] = array[i] = np.array(sorted(array[i], key=lambda x: sum(x), reverse=True))
+    #     createPalleteImage(array[i], 1920, 280, "picked", str(id[i]) + "-avgPICKED")
 
-
-
-
-    #getFrames('madMax')
-
-    # Line below will open (threadCount) number of threads to process frames into the graph. Leave as false for now, will move to a function later.
-
-    # looks in specified folder for 'folder'/Scatters/Frame#.png, will turn all of them into a avi file. 2nd param is fps.
-    # createMP4FromPng('frozen', 23.98)
-
-
-
-
+    # array[13] =np.array(sorted(array[13], key=lambda x: sum(x), reverse=True))
